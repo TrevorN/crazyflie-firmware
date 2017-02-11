@@ -1,5 +1,5 @@
-#ifndef __USBDECK_H__
-#define __USBDECK_H__
+#ifndef __USDDECK_H__
+#define __USDDECK_H__
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -24,4 +24,4 @@ extern xQueueHandle usdDataQueue;
 bool usdQueueLogData(UsdLogStruct* logData);
 
 
-#endif //__USBDECK_H__
+#endif //__USDDECK_H__

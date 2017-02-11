@@ -179,6 +179,7 @@ PROJ_OBJ_CF2 += gtgps.o
 PROJ_OBJ_CF2 += dwm1000.o
 PROJ_OBJ_CF2 += cppmdeck.o
 PROJ_OBJ_CF2 += usddeck.o
+PROJ_OBJ_CF2 += cswarmdeck.o
 #Deck tests
 PROJ_OBJ_CF2 += exptest.o
 #PROJ_OBJ_CF2 += bigquadtest.o

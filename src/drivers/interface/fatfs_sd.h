@@ -31,5 +31,23 @@ typedef struct {
   volatile UINT Timer2;
 } sdSpiOps_t;
 
+typedef struct {
+  void (*initSpi) (void);
+  void (*setSlowSpiMode) (void);
+  void (*setFastSpiMode) (void);
+  BYTE (*xchgSpi) (BYTE dat);
+  void (*rcvrSpiMulti) (BYTE *buff, UINT btr);
+  void (*xmitSpiMulti) (const BYTE *buff, UINT btx);
+  void (*csHigh) (void);
+  void (*csLow) (void);
+
+  volatile DSTATUS stat;
+  BYTE cardType;
+
+  // 1kHz decrement timers stopped at zero (disk_timerproc())
+  volatile UINT timer1;
+  volatile UINT timer2;
+} sdSpiContext_t;
+
 #endif // __FATFS_SD_H__
 
