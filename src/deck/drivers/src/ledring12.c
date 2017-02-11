@@ -565,7 +565,7 @@ static void siren(uint8_t buffer[][3], bool reset)
 /**************** Effect list ***************/
 
 
-Ledring12Effect effectsFct[] =
+static Ledring12Effect effectsFct[] =
 {
   blackEffect,
   whiteSpinEffect,

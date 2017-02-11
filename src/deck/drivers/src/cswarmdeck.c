@@ -40,12 +40,12 @@
 //OS
 #include "FreeRTOS.h"
 #include "task.h"
+#include "worker.h"
 #include "timers.h"
 
 //Filesystem
 #include "ff.h"
 #include "fatfs_sd.h"
-
 #include "cswarmdeck.h"
 
 //uSD
@@ -223,30 +223,30 @@ static void usdInit(DeckInfo *info)
   xTimerStart(timer, 0);
 }
 
-static bool usdTest()
-{
-  if (!isInit)
-  {
-    DEBUG_PRINT("Error while initializing uSD deck\n");
-  }
-#ifdef USD_RUN_DISKIO_FUNCTION_TESTS
-  int result;
-  extern int test_diskio (BYTE pdrv, UINT ncyc, DWORD* buff, UINT sz_buff);
+// static bool usdTest()
+// {
+//   if (!isInit)
+//   {
+//     DEBUG_PRINT("Error while initializing uSD deck\n");
+//   }
+// #ifdef USD_RUN_DISKIO_FUNCTION_TESTS
+//   int result;
+//   extern int test_diskio (BYTE pdrv, UINT ncyc, DWORD* buff, UINT sz_buff);
 
-  result = test_diskio(0, 1, (DWORD*)&workBuff, sizeof(workBuff));
-  if (result)
-  {
-    DEBUG_PRINT("(result=%d)\nFatFs diskio functions test [FAIL].\n", result);
-    isInit = false;
-  }
-  else
-  {
-    DEBUG_PRINT("FatFs diskio functions test [OK].\n");
-  }
-#endif
+//   result = test_diskio(0, 1, (DWORD*)&workBuff, sizeof(workBuff));
+//   if (result)
+//   {
+//     DEBUG_PRINT("(result=%d)\nFatFs diskio functions test [FAIL].\n", result);
+//     isInit = false;
+//   }
+//   else
+//   {
+//     DEBUG_PRINT("FatFs diskio functions test [OK].\n");
+//   }
+// #endif
 
-  return isInit;
-}
+//   return isInit;
+// }
 
 static void usdTimer(xTimerHandle timer)
 {
@@ -254,7 +254,7 @@ static void usdTimer(xTimerHandle timer)
 }
 
 /****************** LED Drivers ********************/
-typedef void (*led4effect)(uint8_t buffer[][3], bool reset);
+typedef void (*led4Effect)(uint8_t buffer[][3], bool reset);
 
 static void cardinalEffect(uint8_t buffer[][3], bool reset)
 {
@@ -304,7 +304,7 @@ static void cardinalEffect(uint8_t buffer[][3], bool reset)
 // }
 
 //List of available 4LED effects.
-led4Effect effectsFct[] =
+static led4Effect effectsFct[] =
 {
   cardinalEffect
   //spinEffect
@@ -343,8 +343,6 @@ static void cswarmdeckLEDTimer(xTimerHandle LEDtimer)
 
 static void cswarmdeckLEDInit(DeckInfo *info)
 {
-  GPIO_InitTypeDef GPIO_InitStructure;
-
   ws2812Init();
 
   neffect = sizeof(effectsFct)/sizeof(effectsFct[0]) - 1;
@@ -362,12 +360,12 @@ static void cswarmdeckLEDInit(DeckInfo *info)
 //Need control over pulse frequency and pulse phase. Need to blink LED at ~500Hz.
 static xTimerHandle IRtimer;
 static uint8_t IRPulse = 0; //Current state of IR LED.
+static uint8_t IRphaseSkip;
 
 //Called every 4 ms (250Hz). (Probably should use a hardware timer + hardware interrupts.)
 void cswarmdeckIRTimer(void * data)
 {
   static bool diodeState = 0;
-  static uint8_t phaseSkip = 0;
 
   switch(IRPulse) {
     case 0:
@@ -379,12 +377,12 @@ void cswarmdeckIRTimer(void * data)
       diodeState = 1;
       break;
     case 2:
-      if(phaseSkip == 0)
+      if(IRphaseSkip == 0)
       {
         digitalWrite(IR_PIN, (diodeState)?LOW:HIGH);
         diodeState = !diodeState;
       } else {
-        phaseSkip--;
+        IRphaseSkip--;
       }
       break;
   }
@@ -392,10 +390,6 @@ void cswarmdeckIRTimer(void * data)
 
 static void cswarmdeckIRInit(DeckInfo *info)
 {
-  GPIO_InitTypeDef GPIO_InitStructure;
-
-  ws2812Init();
-
   pinMode(IR_PIN, OUTPUT);
 
   IRtimer = xTimerCreate("cswarmdeckIRTimer", M2T(5), pdTRUE, NULL, cswarmdeckIRTimer);
@@ -430,4 +424,4 @@ static const DeckDriver cswarm_deck = {
   //.test = cswarmdeckTest, //CURRENTLY UNIMPLEMENTED
 };
 
-DECK_DRIVER(usd_deck);
+DECK_DRIVER(cswarm_deck);
