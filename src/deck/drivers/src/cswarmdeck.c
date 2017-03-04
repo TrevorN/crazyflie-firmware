@@ -1,4 +1,4 @@
-/**
+ /**
  *    ||          ____  _ __
  * +------+      / __ )(_) /_______________ _____  ___
  * | 0xBC |     / __  / / __/ ___/ ___/ __ `/_  / / _ \
@@ -312,7 +312,7 @@ static led4Effect effectsFct[] =
 
 static xTimerHandle LEDtimer;
 
-//Called every 50ms. Updates LEDS.
+//Called every 50ms. Updates LEDs.
 void cswarmdeckLEDWorker(void * data)
 {
   static int current_effect = 0;
@@ -355,44 +355,77 @@ static void cswarmdeckLEDInit(DeckInfo *info)
   xTimerStart(LEDtimer, 100);
 }
 /*************** Infrared Drivers ******************/
-//IR led is controlled on only one pin, need to find PWM drivers.
+//Becuase codes are so short, it's probably better to control in software.
+//Every 100ms, a hardware interrupt that controls the strobing behavior is enabled.
+//Normally leave IR diode on.
 
-//Need control over pulse frequency and pulse phase. Need to blink LED at ~500Hz.
-static xTimerHandle IRtimer;
+//Need control over pulse frequency and pulse phase. Need to blink LED at ~120Hz.
+static uint8_t deviceID = 43;
 static uint8_t IRPulse = 0; //Current state of IR LED.
 static uint8_t IRphaseSkip;
+static uint8_t IRIndex=0;
+static uint16_t IRPeriod=0xFFFE;
+static uint16_t IRPulseWidth=0x7FFF;
 
-//Called every 4 ms (250Hz). (Probably should use a hardware timer + hardware interrupts.)
-void cswarmdeckIRTimer(void * data)
+void TIM2_IRQHandler()
 {
-  static bool diodeState = 0;
+    if(IRIndex == 8){
+      TIM_PrescalerConfig(TIM10, 1, TIM_PSCReloadMode_Update);
+      IRIndex = 0;
+      return;
+    }
 
-  switch(IRPulse) {
-    case 0:
-      digitalWrite(IR_PIN, LOW);
-      diodeState = 0;
-      break;
-    case 1:
-      digitalWrite(IR_PIN, HIGH);
-      diodeState = 1;
-      break;
-    case 2:
-      if(IRphaseSkip == 0)
-      {
-        digitalWrite(IR_PIN, (diodeState)?LOW:HIGH);
-        diodeState = !diodeState;
-      } else {
-        IRphaseSkip--;
-      }
-      break;
-  }
+    if(deviceID & (1 << IRIndex))
+    {
+      TIM_SetCompare1(TIM10, IRPeriod + 1); //Disable output compare TODO: ensure LED pin stays high.
+    } else {
+      TIM_SetCompare1(TIM10, IRPulseWidth); //Enable output compare.
+    }
+
+    if(IRIndex == 7) //at the next event, disable output compare and set the prescaler.
+    {
+      TIM_SetCompare1(TIM10, IRPeriod + 1); //Disable output compare (need to find a better method, but later.)
+
+      TIM_PrescalerConfig(TIM10, 2300, TIM_PSCReloadMode_Update);
+    }
+
+    IRIndex++;
 }
 
 static void cswarmdeckIRInit(DeckInfo *info)
 {
   pinMode(IR_PIN, OUTPUT);
 
-  IRtimer = xTimerCreate("cswarmdeckIRTimer", M2T(5), pdTRUE, NULL, cswarmdeckIRTimer);
+  TIM_TimeBaseInitTypeDef IRTimer;
+  TIM_OCInitTypeDef IROC;
+  //Timer configuration
+  //Timer 10 selected: 16 bit counter, 16 bit prescaler, one output channel.
+  IRTimer.TIM_Period = IRPeriod;
+  IRTimer.TIM_Prescaler = 0; //For now don't prescale.
+  IRTimer.TIM_ClockDivision = 0; //Also no clock division.
+  IRTimer.TIM_CounterMode = TIM_CounterMode_Up;
+  IRTimer.TIM_RepetitionCounter = 0;
+  TIM_TimeBaseInit(TIM10, &IRTimer);
+
+  //Output compare configuration
+  IROC.TIM_OCMode = TIM_OCMode_PWM1;
+  IROC.TIM_OutputState = TIM_OutputState_Enable;
+  IROC.TIM_Pulse = IRPulseWidth; //Half, for now.
+  IROC.TIM_OCPolarity = TIM_OCPolarity_High;
+  IROC.TIM_OCIdleState = TIM_OCIdleState_Set;
+  TIM_OC1Init(TIM10, &IROC);
+
+  //Interrupt configuration
+  TIM_ITConfig(TIM10, TIM_IT_Update, ENABLE); //Enable update interrupts, used to trigger phase shifts.
+
+  NVIC_InitTypeDef nvicStructure;
+  nvicStructure.NVIC_IRQChannel = TIM2_IRQn;
+  nvicStructure.NVIC_IRQChannelPreemptionPriority = 0;
+  nvicStructure.NVIC_IRQChannelSubPriority = 1;
+  nvicStructure.NVIC_IRQChannelCmd = ENABLE;
+  NVIC_Init(&nvicStructure);
+
+  TIM_Cmd(TIM10, ENABLE);
 }
 
 
