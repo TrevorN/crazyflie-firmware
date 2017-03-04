@@ -377,14 +377,14 @@ void TIM2_IRQHandler()
 
     if(deviceID & (1 << IRIndex))
     {
-      TIM_SetCompare1(TIM10, IRPeriod + 1); //Disable output compare TODO: ensure LED pin stays high.
+      TIM_SelectOC1M(TIM10, 1, TIM_OCMode_PWM1);
     } else {
-      TIM_SetCompare1(TIM10, IRPulseWidth); //Enable output compare.
+      TIM_SelectOC1M(TIM10, 1, TIM_ForcedAction_Active); //Force IR led high.
     }
 
     if(IRIndex == 7) //at the next event, disable output compare and set the prescaler.
     {
-      TIM_SetCompare1(TIM10, IRPeriod + 1); //Disable output compare (need to find a better method, but later.)
+      TIM_SelectOC1M(TIM10, 1, TIM_ForcedAction_Active); //Force IR led high.
 
       TIM_PrescalerConfig(TIM10, 2300, TIM_PSCReloadMode_Update);
     }
@@ -398,6 +398,9 @@ static void cswarmdeckIRInit(DeckInfo *info)
 
   TIM_TimeBaseInitTypeDef IRTimer;
   TIM_OCInitTypeDef IROC;
+
+  TIM_TimeBaseStructInit(&IRTimer);
+  TIM_OCStructInit(&IROC);
   //Timer configuration
   //Timer 10 selected: 16 bit counter, 16 bit prescaler, one output channel.
   IRTimer.TIM_Period = IRPeriod;
