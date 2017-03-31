@@ -30,12 +30,13 @@
  * usddeck.c: micro SD deck driver. Implements logging to micro SD card.
  */
 
-#define DEBUG_MODULE "uSD"
+#define DEBUG_MODULE "CSWARM_DECK"
 
 //System
 #include <stdint.h>
 #include <string.h>
 #include "stm32fxxx.h"
+#include "nvicconf.h"
 
 //OS
 #include "FreeRTOS.h"
@@ -63,7 +64,8 @@
 
 // Hardware defines
 #define USD_CS_PIN    DECK_GPIO_IO3
-#define IR_PIN        DECK_GPIO_IO4
+#define IR_PIN        DECK_GPIO_IO1
+#define IR_TIM        TIM10
 
 
 /**************** Some useful macros ***************/
@@ -360,75 +362,88 @@ static void cswarmdeckLEDInit(DeckInfo *info)
 //Normally leave IR diode on.
 
 //Need control over pulse frequency and pulse phase. Need to blink LED at ~120Hz.
-static uint8_t deviceID = 43;
-static uint8_t IRPulse = 0; //Current state of IR LED.
-static uint8_t IRphaseSkip;
-static uint8_t IRIndex=0;
-static uint16_t IRPeriod=0xFFFE;
-static uint16_t IRPulseWidth=0x7FFF;
+// uint8_t deviceID = 43;
+volatile uint8_t IRIndex=0;
 
-void TIM2_IRQHandler()
+void TIM3_IRQHandler()
 {
-    if(IRIndex == 8){
-      TIM_PrescalerConfig(TIM10, 1, TIM_PSCReloadMode_Update);
-      IRIndex = 0;
-      return;
-    }
-
-    if(deviceID & (1 << IRIndex))
-    {
-      TIM_SelectOC1M(TIM10, 1, TIM_OCMode_PWM1);
-    } else {
-      TIM_SelectOC1M(TIM10, 1, TIM_ForcedAction_Active); //Force IR led high.
-    }
-
-    if(IRIndex == 7) //at the next event, disable output compare and set the prescaler.
-    {
-      TIM_SelectOC1M(TIM10, 1, TIM_ForcedAction_Active); //Force IR led high.
-
-      TIM_PrescalerConfig(TIM10, 2300, TIM_PSCReloadMode_Update);
-    }
-
+  if(IRIndex > 8){
+    //TIM3->CCR1 = 1200;
+    TIM3->PSC = 13000;
+    IRIndex = 0;
+  } else {
+   // TIM3->CCR1 = 500;
+    TIM3->PSC = 1300;
     IRIndex++;
+  }
+}
+
+void IRPinsInit() {
+  GPIO_InitTypeDef GPIO_InitStruct;
+  
+  /* Clock for GPIOD */
+  RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOB, ENABLE);
+  
+  /* Alternating functions for pins */
+  GPIO_PinAFConfig(GPIOB, GPIO_PinSource4, GPIO_AF_TIM3);
+  
+  /* Set pins */
+  GPIO_InitStruct.GPIO_Pin = GPIO_Pin_4;
+  GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
+  GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
+  GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AF;
+  GPIO_InitStruct.GPIO_Speed = GPIO_Speed_100MHz;
+  GPIO_Init(GPIOB, &GPIO_InitStruct);
+}
+
+//Timer Initializaiton
+void IRTimerInit() {
+  TIM_TimeBaseInitTypeDef TIM_BaseStruct;
+
+  /* Enable clock for TIM10 */
+  RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE);
+
+  TIM_BaseStruct.TIM_Prescaler = 1300;
+  /* Count up */
+  TIM_BaseStruct.TIM_CounterMode = TIM_CounterMode_Up;
+  TIM_BaseStruct.TIM_Period = 1000; /* 10kHz PWM */
+  TIM_BaseStruct.TIM_ClockDivision = TIM_CKD_DIV1;
+  TIM_BaseStruct.TIM_RepetitionCounter = 0;
+  /* Initialize TIM10 */
+  TIM_TimeBaseInit(TIM3, &TIM_BaseStruct);
+  /* Start count on TIM10 */
+  TIM_Cmd(TIM3, ENABLE);
+}
+
+//Output Compare Initialization
+void IRPWMInit() {
+  TIM_OCInitTypeDef TIM_OCStruct;
+  TIM_OCStruct.TIM_OCMode = TIM_OCMode_PWM1;
+  TIM_OCStruct.TIM_OutputState = TIM_OutputState_Enable;
+  TIM_OCStruct.TIM_OCPolarity = TIM_OCPolarity_High;
+  TIM_OCStruct.TIM_Pulse = 500; /* 50% duty cycle */
+  TIM_OC1Init(TIM3, &TIM_OCStruct);
+  TIM_OC1PreloadConfig(TIM3, TIM_OCPreload_Enable);
+}
+
+//Interrupt configuration
+void IRInterruptInit() {
+  TIM_ITConfig(TIM3, TIM_IT_Update, ENABLE); //Enable update interrupts, used to trigger phase shifts.
+
+  NVIC_InitTypeDef nvicStructure;
+  nvicStructure.NVIC_IRQChannel = TIM3_IRQn;
+  nvicStructure.NVIC_IRQChannelPreemptionPriority = 0x00;
+  nvicStructure.NVIC_IRQChannelSubPriority = 0x00;
+  nvicStructure.NVIC_IRQChannelCmd = ENABLE;
+  NVIC_Init(&nvicStructure);
 }
 
 static void cswarmdeckIRInit(DeckInfo *info)
 {
-  pinMode(IR_PIN, OUTPUT);
-
-  TIM_TimeBaseInitTypeDef IRTimer;
-  TIM_OCInitTypeDef IROC;
-
-  TIM_TimeBaseStructInit(&IRTimer);
-  TIM_OCStructInit(&IROC);
-  //Timer configuration
-  //Timer 10 selected: 16 bit counter, 16 bit prescaler, one output channel.
-  IRTimer.TIM_Period = IRPeriod;
-  IRTimer.TIM_Prescaler = 0; //For now don't prescale.
-  IRTimer.TIM_ClockDivision = 0; //Also no clock division.
-  IRTimer.TIM_CounterMode = TIM_CounterMode_Up;
-  IRTimer.TIM_RepetitionCounter = 0;
-  TIM_TimeBaseInit(TIM10, &IRTimer);
-
-  //Output compare configuration
-  IROC.TIM_OCMode = TIM_OCMode_PWM1;
-  IROC.TIM_OutputState = TIM_OutputState_Enable;
-  IROC.TIM_Pulse = IRPulseWidth; //Half, for now.
-  IROC.TIM_OCPolarity = TIM_OCPolarity_High;
-  IROC.TIM_OCIdleState = TIM_OCIdleState_Set;
-  TIM_OC1Init(TIM10, &IROC);
-
-  //Interrupt configuration
-  TIM_ITConfig(TIM10, TIM_IT_Update, ENABLE); //Enable update interrupts, used to trigger phase shifts.
-
-  NVIC_InitTypeDef nvicStructure;
-  nvicStructure.NVIC_IRQChannel = TIM2_IRQn;
-  nvicStructure.NVIC_IRQChannelPreemptionPriority = 0;
-  nvicStructure.NVIC_IRQChannelSubPriority = 1;
-  nvicStructure.NVIC_IRQChannelCmd = ENABLE;
-  NVIC_Init(&nvicStructure);
-
-  TIM_Cmd(TIM10, ENABLE);
+  IRPinsInit();
+  IRTimerInit();
+  IRPWMInit();
+  IRInterruptInit();
 }
 
 
@@ -436,24 +451,25 @@ static void cswarmdeckIRInit(DeckInfo *info)
 
 static void cswarmdeckInit(DeckInfo *info)
 {
-  cswarmdeckLEDInit(info);
+  DEBUG_PRINT("cswarm deck initializing\n");
   cswarmdeckIRInit(info);
+  return;
+  cswarmdeckLEDInit(info);
   usdInit(info);
+  DEBUG_PRINT("cswarm deck initialized\n");
 }
 
-//Parameter registry
-PARAM_GROUP_START(cswarm_deck)
-PARAM_ADD(PARAM_UINT8, effect, &effect) //The selected parameter to display.
-PARAM_ADD(PARAM_UINT32 | PARAM_RONLY, neffect, &neffect) //Read max # of parameters.
-PARAM_ADD(PARAM_UINT8, IRphaseSkip, &IRphaseSkip) //Set number of pulses to stall for.
-PARAM_ADD(PARAM_UINT8, IRPulse, &IRPulse) //0: off, 1: on, 2: 250Hz
-PARAM_GROUP_STOP(cswarm_deck)
+// //Parameter registry
+// PARAM_GROUP_START(cswarm_deck)
+// PARAM_ADD(PARAM_UINT8, effect, &effect) //The selected parameter to display.
+// PARAM_ADD(PARAM_UINT32 | PARAM_RONLY, neffect, &neffect) //Read max # of parameters.
+// PARAM_ADD(PARAM_UINT8, IRphaseSkip, &IRphaseSkip) //Set number of pulses to stall for.
+// PARAM_ADD(PARAM_UINT8, IRPulse, &IRPulse) //0: off, 1: on, 2: 250Hz
+// PARAM_GROUP_STOP(cswarm_deck)
 
 //Deck driver declaration
 static const DeckDriver cswarm_deck = {
-  .vid = 0xBC,//TODO: Pick new vid
-  .pid = 0x08,//TODO: Pick new pid
-  .name = "bcUSD",
+  .name = "cswarm",
   .usedGpio = DECK_USING_MISO|DECK_USING_MOSI|DECK_USING_SCK|DECK_USING_IO_4,
   .usedPeriph = DECK_USING_SPI,
   .init = cswarmdeckInit,

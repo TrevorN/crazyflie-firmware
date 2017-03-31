@@ -36,7 +36,8 @@ void pinMode(uint32_t pin, uint32_t mode)
 
   RCC_AHB1PeriphClockCmd(deckGPIOMapping[pin-1].periph, ENABLE);
 
-  GPIO_InitTypeDef GPIO_InitStructure = {0};
+  GPIO_InitTypeDef GPIO_InitStructure;
+  GPIO_StructInit(&GPIO_InitStructure);
 
   GPIO_InitStructure.GPIO_Pin = deckGPIOMapping[pin-1].pin;
   GPIO_InitStructure.GPIO_Mode = (mode == OUTPUT) ? GPIO_Mode_OUT:GPIO_Mode_IN;
