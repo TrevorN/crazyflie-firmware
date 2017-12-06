@@ -362,21 +362,22 @@ static void cswarmdeckLEDInit(DeckInfo *info)
 //Normally leave IR diode on.
 
 //Need control over pulse frequency and pulse phase. Need to blink LED at ~120Hz.
-// uint8_t deviceID = 43;
+uint16_t deviceID = 44;
 volatile uint8_t IRIndex=0;
+uint16_t unpacked_ID[16];
 
-void TIM3_IRQHandler()
+//Convert the device ID into a series of pulse widths with added parity bit
+void IRUnpackID(uint8_t id)
 {
-  if(IRIndex > 8){
-    //TIM3->CCR1 = 1200;
-    TIM3->PSC = 13000;
-    IRIndex = 0;
-  } else {
-   // TIM3->CCR1 = 500;
-    TIM3->PSC = 1300;
-    IRIndex++;
+  bool parity = 0;
+  for(int i = 0; i < 15; i++)
+  {
+    unpacked_ID[i] = (deviceID & (0x4000 >> i)) ? 500 : 0;
+    parity ^= deviceID & (0x4000 >> i);
   }
+  unpacked_ID[15] = parity ? 500: 0;
 }
+
 
 void IRPinsInit() {
   GPIO_InitTypeDef GPIO_InitStruct;
@@ -403,7 +404,7 @@ void IRTimerInit() {
   /* Enable clock for TIM10 */
   RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE);
 
-  TIM_BaseStruct.TIM_Prescaler = 1300;
+  TIM_BaseStruct.TIM_Prescaler = 1200;
   /* Count up */
   TIM_BaseStruct.TIM_CounterMode = TIM_CounterMode_Up;
   TIM_BaseStruct.TIM_Period = 1000; /* 10kHz PWM */
@@ -420,7 +421,7 @@ void IRPWMInit() {
   TIM_OCInitTypeDef TIM_OCStruct;
   TIM_OCStruct.TIM_OCMode = TIM_OCMode_PWM1;
   TIM_OCStruct.TIM_OutputState = TIM_OutputState_Enable;
-  TIM_OCStruct.TIM_OCPolarity = TIM_OCPolarity_High;
+  TIM_OCStruct.TIM_OCPolarity = TIM_OCPolarity_Low;
   TIM_OCStruct.TIM_Pulse = 500; /* 50% duty cycle */
   TIM_OC1Init(TIM3, &TIM_OCStruct);
   TIM_OC1PreloadConfig(TIM3, TIM_OCPreload_Enable);
@@ -428,14 +429,54 @@ void IRPWMInit() {
 
 //Interrupt configuration
 void IRInterruptInit() {
-  TIM_ITConfig(TIM3, TIM_IT_Update, ENABLE); //Enable update interrupts, used to trigger phase shifts.
+  DMA_InitTypeDef DMA_InitStructure;
+  //NVIC_InitTypeDef NVIC_InitStructure;
 
-  NVIC_InitTypeDef nvicStructure;
-  nvicStructure.NVIC_IRQChannel = TIM3_IRQn;
-  nvicStructure.NVIC_IRQChannelPreemptionPriority = 0x00;
-  nvicStructure.NVIC_IRQChannelSubPriority = 0x00;
-  nvicStructure.NVIC_IRQChannelCmd = ENABLE;
-  NVIC_Init(&nvicStructure);
+  //Create 8 byte buffer of LED timing values.
+  IRUnpackID(deviceID);
+
+  DEBUG_PRINT("ID Vec High: %d, %d, %d, %d\n", unpacked_ID[0], unpacked_ID[1], unpacked_ID[2], unpacked_ID[3]);
+  DEBUG_PRINT("ID Vec Low: %d, %d, %d, %d\n", unpacked_ID[4], unpacked_ID[5], unpacked_ID[6], unpacked_ID[7]);
+  DEBUG_PRINT("ID Vec Low: %d, %d, %d, %d\n", unpacked_ID[8], unpacked_ID[9], unpacked_ID[10], unpacked_ID[11]);
+  DEBUG_PRINT("ID Vec Low: %d, %d, %d, %d\n", unpacked_ID[12], unpacked_ID[13], unpacked_ID[14], unpacked_ID[15]);
+
+  RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_DMA1, ENABLE);
+
+  /* DMA1 Channel2 Config */
+  DMA_DeInit(DMA1_Stream4);
+
+  // USART TX DMA Channel Config
+  DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&TIM3->CCR1;
+  DMA_InitStructure.DMA_Memory0BaseAddr = (uint32_t)&unpacked_ID;    // this is the buffer memory
+  DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
+  DMA_InitStructure.DMA_MemoryBurst = DMA_MemoryBurst_Single;
+  DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
+  DMA_InitStructure.DMA_BufferSize = 16;
+  DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+  DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
+  DMA_InitStructure.DMA_PeripheralBurst = DMA_PeripheralBurst_Single;
+  DMA_InitStructure.DMA_DIR = DMA_DIR_MemoryToPeripheral;
+  DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;
+  DMA_InitStructure.DMA_Priority = DMA_Priority_Medium;
+  DMA_InitStructure.DMA_FIFOMode = DMA_FIFOMode_Disable;
+  DMA_InitStructure.DMA_FIFOThreshold = DMA_FIFOThreshold_1QuarterFull;
+  DMA_InitStructure.DMA_Channel = DMA_Channel_5;
+  DMA_Init(DMA1_Stream4, &DMA_InitStructure);
+
+
+  // NVIC_InitStructure.NVIC_IRQChannel = DMA1_Stream4_IRQn;
+  // NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = NVIC_LOW_PRI;
+  // NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
+  // NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+  // NVIC_Init(&NVIC_InitStructure);
+
+  // DMA_ITConfig(DMA1_Stream4, DMA_IT_TC, ENABLE);
+  // DMA_ITConfig(DMA1_Stream4, DMA_IT_HT, ENABLE);
+
+  /* TIM3 CC1 DMA Request enable */
+  TIM_DMACmd(TIM3, TIM_DMA_CC1, ENABLE);
+
+  DMA_Cmd(DMA1_Stream4, ENABLE);
 }
 
 static void cswarmdeckIRInit(DeckInfo *info)
@@ -444,6 +485,8 @@ static void cswarmdeckIRInit(DeckInfo *info)
   IRTimerInit();
   IRPWMInit();
   IRInterruptInit();
+
+  DEBUG_PRINT("CCR1: %d", (int)TIM3->CCR1);
 }
 
 
