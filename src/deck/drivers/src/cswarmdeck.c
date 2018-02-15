@@ -362,7 +362,7 @@ static void cswarmdeckLEDInit(DeckInfo *info)
 //Normally leave IR diode on.
 
 //Need control over pulse frequency and pulse phase. Need to blink LED at ~120Hz.
-uint16_t deviceID = 44;
+uint16_t deviceID = 35;
 volatile uint8_t IRIndex=0;
 uint16_t unpacked_ID[16];
 
